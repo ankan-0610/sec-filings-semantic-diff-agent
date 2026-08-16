@@ -125,14 +125,95 @@ async def _call_anthropic(prompt: str) -> dict:
     return json.loads(text)
 
 
+async def _call_mistral(prompt: str) -> dict:
+    """Call Mistral AI HTTP API and return parsed JSON from the model text output.
+
+    This function attempts to handle a few common response shapes and extract
+    the model's text output, which is expected to be a JSON string matching
+    the reasoning schema.
+    """
+    url = "https://api.mistral.ai/v1/generate"
+    headers = {
+        "Authorization": f"Bearer {settings.MISTRAL_API_KEY}",
+        "Content-Type": "application/json",
+    }
+
+    payload = {
+        "model": settings.LLM_MODEL,
+        "input": prompt,
+        "temperature": 0.2,
+        "max_new_tokens": 600,
+    }
+
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(url, headers=headers, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+
+    # Try to find the model output text in common keys/structures.
+    text = None
+    if isinstance(data, dict):
+        for key in ("outputs", "results", "choices", "data"):
+            val = data.get(key)
+            if not val:
+                continue
+            if isinstance(val, list) and val:
+                first = val[0]
+                if isinstance(first, str):
+                    text = first
+                    break
+                if isinstance(first, dict):
+                    for candidate in ("content", "text", "message", "output", "response"):
+                        c = first.get(candidate)
+                        if isinstance(c, str):
+                            text = c
+                            break
+                        if isinstance(c, list) and c:
+                            for item in c:
+                                if isinstance(item, dict) and isinstance(item.get("text"), str):
+                                    text = item["text"]
+                                    break
+                            if text:
+                                break
+                    if text:
+                        break
+
+    # Fallback: search nested structure for the first string value.
+    if not text:
+        def _find_first_str(o):
+            if isinstance(o, str):
+                return o
+            if isinstance(o, dict):
+                for v in o.values():
+                    r = _find_first_str(v)
+                    if r:
+                        return r
+            if isinstance(o, list):
+                for it in o:
+                    r = _find_first_str(it)
+                    if r:
+                        return r
+            return None
+
+        text = _find_first_str(data)
+
+    if not text:
+        raise RuntimeError("Unexpected Mistral response format")
+
+    return json.loads(text)
+
+
 async def _call_llm(prompt: str) -> LlmReasonResponse:
-    if settings.OPENAI_API_KEY:
+    # Prefer Mistral if configured, then OpenAI, then Anthropic.
+    if settings.MISTRAL_API_KEY:
+        parsed = await _call_mistral(prompt)
+    elif settings.OPENAI_API_KEY:
         parsed = await _call_openai(prompt)
     elif settings.ANTHROPIC_API_KEY:
         parsed = await _call_anthropic(prompt)
     else:
         raise RuntimeError(
-            "No LLM API key configured. Set OPENAI_API_KEY or ANTHROPIC_API_KEY."
+            "No LLM API key configured. Set MISTRAL_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY."
         )
 
     adapter = TypeAdapter(LlmReasonResponse)
