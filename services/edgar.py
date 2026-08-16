@@ -112,11 +112,20 @@ async def fetch_filing_html(
     await asyncio.sleep(settings.EDGAR_RATE_LIMIT_SLEEP)
     async with httpx.AsyncClient(timeout=40) as client:
         url = _archives_filing_url(cik_padded, accession_no_dashes, primary_doc)
-        resp = await client.get(url, headers=_headers())
+        # Follow redirects from the SEC (some archive paths redirect between
+        # zero-padded and non-padded CIK directories). Allow httpx to follow
+        # them automatically so we get the final HTML content.
+        resp = await client.get(url, headers=_headers(), follow_redirects=True)
         resp.raise_for_status()
         html = resp.text
 
-    soup = BeautifulSoup(html, "lxml")
+    # Choose parser dynamically: some SEC filings are XML/XHTML and will raise
+    # an XMLParsedAsHTMLWarning when parsed with the HTML parser. Detect XML
+    # by a leading XML declaration and parse as XML in that case to avoid the
+    # warning and get more reliable parsing.
+    html_start = html.lstrip()[:200].lower()
+    parser = "lxml-xml" if html_start.startswith("<?xml") else "lxml"
+    soup = BeautifulSoup(html, parser)
     for tag in soup(["script", "style", "noscript"]):
         tag.extract()
 
