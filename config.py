@@ -9,7 +9,8 @@ class Settings(BaseSettings):
     # Note: this project uses raw HTTP calls via httpx; no provider SDKs required.
     OPENAI_API_KEY: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
     ANTHROPIC_API_KEY: str | None = Field(default=None, validation_alias="ANTHROPIC_API_KEY")
-    LLM_MODEL: str = Field(default="gpt-4o-mini", description="LLM model id used for reasoning.")
+    MISTRAL_API_KEY: str | None = Field(default=None, validation_alias="MISTRAL_API_KEY")
+    LLM_MODEL: str = Field(default="mistral-7b-instruct", description="LLM model id used for reasoning.")
 
     # Embeddings
     EMBEDDING_MODEL: str = Field(default="all-MiniLM-L6-v2")
