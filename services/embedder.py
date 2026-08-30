@@ -1,13 +1,23 @@
 from __future__ import annotations
 
 import numpy as np
+import torch
 from sentence_transformers import SentenceTransformer
 
 from config import settings
 
-# Load the embedding model once at module level (required convention).
-_model = SentenceTransformer(settings.EMBEDDING_MODEL)
+# Prefer CPU when CUDA is unavailable or incompatible with the installed PyTorch build.
+# This project uses an all-MiniLM model, which runs comfortably on CPU for a watchlist workflow.
+if torch.cuda.is_available():
+    try:
+        _device = "cuda" if torch.cuda.get_device_capability()[0] >= 7 else "cpu"
+    except Exception:  # pragma: no cover - defensive fallback
+        _device = "cpu"
+else:
+    _device = "cpu"
 
+# Load the embedding model once at module level (required convention).
+_model = SentenceTransformer(settings.EMBEDDING_MODEL, device=_device)
 
 def chunk_by_tokens(text: str, *, window_tokens: int = 512, overlap_tokens: int = 64) -> list[str]:
     """
