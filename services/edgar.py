@@ -56,6 +56,25 @@ def _archives_filing_url(cik_padded: str, accession_no_dashes: str, primary_doc:
     )
 
 
+def _clean_filing_text(raw_text: str) -> str:
+    """Remove inline-XBRL / taxonomy noise that pollutes SEC narrative text."""
+    cleaned = raw_text.replace("\xa0", " ")
+    cleaned = cleaned.replace("\r", "\n")
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+
+    # Strip common XBRL namespaces and taxonomy fact tags that are not useful narrative.
+    cleaned = re.sub(r"(?is)<\s*(?:ix|xbrli|xlink|link|us-gaap|dei|srt|ifrs-full|us-ias|country|currency|entity|jurisdiction|segment|us-gaap|iso4217|xbrldt|xbrli)[:\w-]*[^>]*>", " ", cleaned)
+    cleaned = re.sub(r"(?is)</\s*(?:ix|xbrli|xlink|link|us-gaap|dei|srt|ifrs-full|us-ias|country|currency|entity|jurisdiction|segment|xbrldt)[:\w-]*>", " ", cleaned)
+
+    # Plain-text artifacts commonly left behind by inline XBRL fact tags.
+    cleaned = re.sub(r"\b(?:ntrue|nfalse|nFY|nP1Y|nP0Y|n\d{4}|n[A-Z0-9]{2,})\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b[a-zA-Z]+:\s*/\s*/\b", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
 @retry(wait=wait_exponential_jitter(initial=0.5, max=10), stop=stop_after_attempt(5))
 async def fetch_submissions_json(cik_padded: str) -> dict[str, Any]:
     await asyncio.sleep(settings.EDGAR_RATE_LIMIT_SLEEP)
@@ -131,9 +150,11 @@ async def fetch_filing_html(
 
     # SEC filings can be huge; preserve paragraph-ish boundaries.
     text = soup.get_text(separator="\\n")
-    # Collapse excessive whitespace.
-    text = re.sub(r"[ \\t]+", " ", text)
-    text = re.sub(r"\\n{3,}", "\\n\\n", text).strip()
+
+    # Remove inline XBRL namespaces and fact tags before embedding. These
+    # documents often contain taxonomy metadata and numeric facts that drown out
+    # the human-readable narrative.
+    text = _clean_filing_text(text)
     return text
 
 
